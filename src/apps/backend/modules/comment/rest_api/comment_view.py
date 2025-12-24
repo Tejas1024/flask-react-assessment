@@ -1,6 +1,10 @@
+from dataclasses import asdict
 from flask import Blueprint, jsonify, request
-from datetime import datetime
+from flask.typing import ResponseReturnValue
+
+from modules.authentication.rest_api.access_auth_middleware import access_auth_middleware
 from modules.comment.comment_service import CommentService
+from modules.comment.errors import CommentBadRequestError
 from modules.comment.types import (
     CreateCommentParams,
     UpdateCommentParams,
@@ -9,73 +13,44 @@ from modules.comment.types import (
     GetCommentsByTaskParams,
 )
 
-comment_bp = Blueprint('comment', __name__, url_prefix='/api/v1/comments')
+comment_bp = Blueprint('comments', __name__, url_prefix='/api/accounts/<account_id>/tasks/<task_id>/comments')
 
 @comment_bp.route('', methods=['POST'])
-def create_comment():
-    """Create a new comment"""
+@access_auth_middleware
+def create_comment(account_id: str, task_id: str) -> ResponseReturnValue:
     data = request.get_json()
     
-    if not data or not all(k in data for k in ['task_id', 'account_id', 'content']):
-        return jsonify({'error': 'Missing required fields'}), 400
+    if not data or 'content' not in data:
+        raise CommentBadRequestError('Content is required')
     
     params = CreateCommentParams(
-        task_id=data['task_id'],
-        account_id=data['account_id'],
+        task_id=task_id,
+        account_id=account_id,
         content=data['content']
     )
     
-    comment = CommentService.create_comment(params)
-    return jsonify({
-        'id': comment.id,
-        'task_id': comment.task_id,
-        'account_id': comment.account_id,
-        'content': comment.content,
-        'created_at': comment.created_at.isoformat(),
-        'updated_at': comment.updated_at.isoformat() if comment.updated_at else None,
-    }), 201
+    comment = CommentService.create_comment(params=params)
+    return jsonify(asdict(comment)), 201
 
 @comment_bp.route('/<comment_id>', methods=['GET'])
-def get_comment(comment_id):
-    """Get a specific comment"""
-    task_id = request.args.get('task_id')
-    account_id = request.args.get('account_id')
-    
-    if not task_id or not account_id:
-        return jsonify({'error': 'Missing task_id or account_id'}), 400
-    
+@access_auth_middleware
+def get_comment(account_id: str, task_id: str, comment_id: str) -> ResponseReturnValue:
     params = GetCommentParams(
         comment_id=comment_id,
         task_id=task_id,
         account_id=account_id
     )
     
-    comment = CommentService.get_comment(params)
-    if not comment:
-        return jsonify({'error': 'Comment not found'}), 404
-    
-    return jsonify({
-        'id': comment.id,
-        'task_id': comment.task_id,
-        'account_id': comment.account_id,
-        'content': comment.content,
-        'created_at': comment.created_at.isoformat(),
-        'updated_at': comment.updated_at.isoformat() if comment.updated_at else None,
-    })
+    comment = CommentService.get_comment(params=params)
+    return jsonify(asdict(comment)), 200
 
-@comment_bp.route('/<comment_id>', methods=['PUT'])
-def update_comment(comment_id):
-    """Update a comment"""
+@comment_bp.route('/<comment_id>', methods=['PATCH'])
+@access_auth_middleware
+def update_comment(account_id: str, task_id: str, comment_id: str) -> ResponseReturnValue:
     data = request.get_json()
     
     if not data or 'content' not in data:
-        return jsonify({'error': 'Missing content field'}), 400
-    
-    task_id = request.args.get('task_id')
-    account_id = request.args.get('account_id')
-    
-    if not task_id or not account_id:
-        return jsonify({'error': 'Missing task_id or account_id'}), 400
+        raise CommentBadRequestError('Content is required')
     
     params = UpdateCommentParams(
         comment_id=comment_id,
@@ -84,61 +59,28 @@ def update_comment(comment_id):
         content=data['content']
     )
     
-    comment = CommentService.update_comment(params)
-    if not comment:
-        return jsonify({'error': 'Comment not found'}), 404
-    
-    return jsonify({
-        'id': comment.id,
-        'task_id': comment.task_id,
-        'account_id': comment.account_id,
-        'content': comment.content,
-        'created_at': comment.created_at.isoformat(),
-        'updated_at': comment.updated_at.isoformat() if comment.updated_at else None,
-    })
+    comment = CommentService.update_comment(params=params)
+    return jsonify(asdict(comment)), 200
 
 @comment_bp.route('/<comment_id>', methods=['DELETE'])
-def delete_comment(comment_id):
-    """Delete a comment"""
-    task_id = request.args.get('task_id')
-    account_id = request.args.get('account_id')
-    
-    if not task_id or not account_id:
-        return jsonify({'error': 'Missing task_id or account_id'}), 400
-    
+@access_auth_middleware
+def delete_comment(account_id: str, task_id: str, comment_id: str) -> ResponseReturnValue:
     params = DeleteCommentParams(
         comment_id=comment_id,
         task_id=task_id,
         account_id=account_id
     )
     
-    if not CommentService.delete_comment(params):
-        return jsonify({'error': 'Comment not found'}), 404
-    
+    CommentService.delete_comment(params=params)
     return '', 204
 
-@comment_bp.route('/task/<task_id>', methods=['GET'])
-def get_task_comments(task_id):
-    """Get all comments for a task"""
-    account_id = request.args.get('account_id')
-    
-    if not account_id:
-        return jsonify({'error': 'Missing account_id'}), 400
-    
+@comment_bp.route('', methods=['GET'])
+@access_auth_middleware
+def get_task_comments(account_id: str, task_id: str) -> ResponseReturnValue:
     params = GetCommentsByTaskParams(
         task_id=task_id,
         account_id=account_id
     )
     
-    comments = CommentService.get_comments_by_task(params)
-    return jsonify([
-        {
-            'id': c.id,
-            'task_id': c.task_id,
-            'account_id': c.account_id,
-            'content': c.content,
-            'created_at': c.created_at.isoformat(),
-            'updated_at': c.updated_at.isoformat() if c.updated_at else None,
-        }
-        for c in comments
-    ])
+    comments = CommentService.get_comments_by_task(params=params)
+    return jsonify([asdict(c) for c in comments]), 200
